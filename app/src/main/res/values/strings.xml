@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RTMP Server</string>
+    <string name="rtmp_url_label">RTMP URL</string>
+    <string name="stream_key_label">Stream Key: test</string>
+    <string name="status_waiting">Waiting for stream…</string>
+    <string name="status_publishing">● LIVE</string>
+</resources>

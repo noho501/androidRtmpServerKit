@@ -1,0 +1,19 @@
+# Build outputs
+build/
+.gradle/
+*.apk
+*.aab
+*.ap_
+
+# Local config
+local.properties
+*.iml
+.idea/
+.DS_Store
+
+# NDK
+*.so
+
+# Keystore
+*.jks
+*.keystore
