@@ -23,10 +23,17 @@ internal class RTMPCommandHandler(
             "FCPublish" -> handleFCPublish(transactionId, args)
             "createStream" -> handleCreateStream(transactionId)
             "publish" -> handlePublish(args)
-            "deleteStream" -> { /* ignore */ }
-            "FCUnpublish" -> { /* ignore */ }
-            "@setDataFrame" -> { /* ignore metadata */ }
-            else -> { /* ignore unknown */ }
+            "deleteStream" -> { /* ignore */
+            }
+
+            "FCUnpublish" -> { /* ignore */
+            }
+
+            "@setDataFrame" -> { /* ignore metadata */
+            }
+
+            else -> { /* ignore unknown */
+            }
         }
     }
 
@@ -57,7 +64,7 @@ internal class RTMPCommandHandler(
     }
 
     private fun handlePublish(args: List<Any?>) {
-        val streamKey = args.getOrNull(1) as? String ?: ""
+        val streamKey = (args.getOrNull(3) as? String) ?: (args.getOrNull(1) as? String) ?: ""
         sendOnStatus("NetStream.Publish.Start", "Start publishing")
         onPublish?.invoke(streamKey)
     }
@@ -183,7 +190,12 @@ internal class RTMPCommandHandler(
         }
     }
 
-    private fun buildChunkHeader(csid: Int, messageType: Int, streamId: Long, payloadSize: Int): ByteArray {
+    private fun buildChunkHeader(
+        csid: Int,
+        messageType: Int,
+        streamId: Long,
+        payloadSize: Int
+    ): ByteArray {
         val buf = mutableListOf<Byte>()
         // Basic header: fmt=0, csid
         buf.add((csid and 0x3F).toByte())

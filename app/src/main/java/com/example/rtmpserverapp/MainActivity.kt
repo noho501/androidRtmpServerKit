@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.graphics.toColorInt
 import com.example.rtmpserverapp.databinding.ActivityMainBinding
 import com.example.rtmpserverkit.publicapi.RTMPServerPublic
 import java.net.Inet4Address
@@ -34,16 +35,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupRtmpUrl() {
         val ip = getLocalIpAddress() ?: "192.168.x.x"
-        binding.tvRtmpUrl.text = "rtmp://$ip:$RTMP_PORT/live"
+        val url = "rtmp://$ip:$RTMP_PORT/live"
+
+        binding.tvRtmpUrl.text = url
         binding.tvStreamKey.text = "Stream key: test"
+
+        Log.d(TAG, "URL: $url")
     }
 
     private fun setupServer() {
-        rtmpServer.onPublish = { streamKey ->
-            Log.i(TAG, "Publishing: $streamKey")
+        rtmpServer.onPublish = { _ ->
             runOnUiThread {
                 binding.tvStatus.text = "● LIVE"
-                binding.tvStatus.setTextColor(android.graphics.Color.parseColor("#FF4444"))
+                binding.tvStatus.setTextColor("#FF4444".toColorInt())
             }
         }
 
@@ -58,9 +62,13 @@ class MainActivity : AppCompatActivity() {
         // Attach the SurfaceView for video rendering
         rtmpServer.attachSurface(binding.surfaceView)
 
-        // Start server
-        rtmpServer.start(RTMP_PORT)
-        Log.i(TAG, "RTMP server started on port $RTMP_PORT")
+        try {
+            // Start server
+            rtmpServer.start(RTMP_PORT)
+
+        } catch (e: Exception) {
+            Log.d(TAG, "Failed to start RTMP Server: ${e.message}")
+        }
     }
 
     override fun onDestroy() {

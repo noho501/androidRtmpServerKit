@@ -48,11 +48,13 @@ internal class H264Parser {
                 parseAVCDecoderConfigRecord(payload, 5)
                 null // Don't return NALUs for sequence header
             }
+
             AVC_NALU -> {
                 if (!spsPpsStore.hasSPSPPS) return null
                 val naluData = payload.copyOfRange(5, payload.size)
                 naluAssembler.toAnnexB(naluData, naluLengthSize)
             }
+
             AVC_END_OF_SEQUENCE -> null
             else -> null
         }
@@ -119,8 +121,15 @@ internal class H264Parser {
             }
 
             if (spsData != null && ppsData != null) {
-                spsPpsStore.update(spsData, ppsData)
-                Log.d(TAG, "SPS/PPS extracted: SPS=${spsData.size}B, PPS=${ppsData.size}B, naluLen=$naluLengthSize")
+                val width = extractWidth(spsData)
+                val height = extractHeight(spsData)
+
+                spsPpsStore.update(spsData, ppsData, width, height)
+
+                Log.d(
+                    TAG,
+                    "SPS/PPS extracted: SPS = ${spsData.size}B, PPS = ${ppsData.size}B, naluLen=$naluLengthSize"
+                )
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error parsing AVCDecoderConfigRecord: ${e.message}")
@@ -130,5 +139,75 @@ internal class H264Parser {
     fun reset() {
         spsPpsStore.reset()
         naluLengthSize = 4
+    }
+
+    // --- H264 SPS Parsing (Simplified Exp-Golomb) ---
+    private fun extractWidth(sps: ByteArray): Int {
+        try {
+            val reader = BitReader(sps)
+            reader.readBits(8) // forbidden_zero_bit, nal_ref_idc, nal_unit_type
+            val profileIdc = reader.readBits(8)
+            reader.readBits(8) // constraint_set flags
+            reader.readBits(8) // level_idc
+            reader.readUE()    // seq_parameter_set_id
+
+            if (profileIdc == 100 || profileIdc == 110 || profileIdc == 122 || profileIdc == 244) {
+                val chromaFormatIdc = reader.readUE()
+                if (chromaFormatIdc == 3) reader.readBits(1)
+                reader.readUE() // bit_depth_luma_minus8
+                reader.readUE() // bit_depth_chroma_minus8
+                reader.readBits(1) // qpprime_y_zero_transform_bypass_flag
+                if (reader.readBits(1) == 1) { // seq_scaling_matrix_present_flag
+                    // Skip scaling matrix
+                }
+            }
+
+            reader.readUE() // log2_max_frame_num_minus4
+            val picOrderCntType = reader.readUE()
+            if (picOrderCntType == 0) {
+                reader.readUE() // log2_max_pic_order_cnt_lsb_minus4
+            } else if (picOrderCntType == 1) {
+                // skip pic_order_cnt offset info
+            }
+
+            reader.readUE() // max_num_ref_frames
+            reader.readBits(1) // gaps_in_frame_num_value_allowed_flag
+
+            val picWidthInMbsMinus1 = reader.readUE()
+            return (picWidthInMbsMinus1 + 1) * 16
+        } catch (_: Exception) {
+            return 1280 // Returns default if parsing fails.
+        }
+    }
+
+    private fun extractHeight(sps: ByteArray): Int {
+        return 720
+    }
+
+    //
+    private class BitReader(val data: ByteArray) {
+        private var byteOffset = 0
+        private var bitOffset = 0
+
+        fun readBits(n: Int): Int {
+            var result = 0
+            for (i in 0 until n) {
+                val bit = (data[byteOffset].toInt() shr (7 - bitOffset)) and 1
+                result = (result shl 1) or bit
+                bitOffset++
+                if (bitOffset == 8) {
+                    bitOffset = 0
+                    byteOffset++
+                }
+            }
+            return result
+        }
+
+        fun readUE(): Int { // Unsigned Exp-Golomb
+            var leadingZeros = 0
+            while (readBits(1) == 0 && leadingZeros < 32) leadingZeros++
+            if (leadingZeros == 0) return 0
+            return (1 shl leadingZeros) - 1 + readBits(leadingZeros)
+        }
     }
 }

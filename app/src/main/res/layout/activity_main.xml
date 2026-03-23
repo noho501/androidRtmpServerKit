@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000">
@@ -28,20 +26,20 @@
             android:id="@+id/tvRtmpUrl"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:fontFamily="monospace"
             android:text="rtmp://&lt;device-ip&gt;:1935/live"
             android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:fontFamily="monospace" />
+            android:textSize="14sp" />
 
         <TextView
             android:id="@+id/tvStreamKey"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
+            android:fontFamily="monospace"
             android:text="Stream key: test"
             android:textColor="#CCFFFFFF"
-            android:textSize="13sp"
-            android:fontFamily="monospace" />
+            android:textSize="13sp" />
 
     </LinearLayout>
 
