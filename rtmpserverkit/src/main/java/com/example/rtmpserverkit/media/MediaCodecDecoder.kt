@@ -2,6 +2,7 @@ package com.example.rtmpserverkit.media
 
 import android.media.MediaCodec
 import android.media.MediaFormat
+import android.os.Build
 import android.util.Log
 import android.view.Surface
 import java.nio.ByteBuffer
@@ -45,16 +46,21 @@ internal class MediaCodecDecoder {
     /**
      * Initialize the decoder with SPS and PPS NAL unit data (without start codes).
      */
-    fun initWithSPSPPS(sps: ByteArray, pps: ByteArray) {
+    fun initWithSPSPPS(sps: ByteArray, pps: ByteArray, width: Int, height: Int) {
         val surf = surface ?: run {
-            Log.w(TAG, "No surface attached, skipping decoder init")
             return
         }
 
         try {
             release()
 
-            val format = MediaFormat.createVideoFormat(MIME_TYPE, 0, 0)
+            val format = MediaFormat.createVideoFormat(MIME_TYPE, width, height)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                format.setInteger(MediaFormat.KEY_LATENCY, 0)
+            }
+
+            format.setInteger(MediaFormat.KEY_PRIORITY, 0) // Real-time priority
             // SPS and PPS are stored without start codes in MediaFormat
             format.setByteBuffer("csd-0", ByteBuffer.wrap(prependStartCode(sps)))
             format.setByteBuffer("csd-1", ByteBuffer.wrap(prependStartCode(pps)))
@@ -65,9 +71,9 @@ internal class MediaCodecDecoder {
             codec = newCodec
             initialized.set(true)
             running.set(true)
-            Log.i(TAG, "MediaCodec decoder initialized")
+
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to init decoder: ${e.message}")
+            Log.e(TAG, "CRITICAL: Failed to init decoder!", e)
             release()
         }
     }
@@ -75,34 +81,41 @@ internal class MediaCodecDecoder {
     /**
      * Feed an Annex-B formatted NALU (with 0x00000001 start code) into the decoder.
      */
-    fun feedNalu(annexBData: ByteArray) {
+    fun feedNalu(annexBData: ByteArray, timestampUs: Long = System.nanoTime() / 1000) {
         val c = codec ?: return
         if (!running.get()) return
 
         try {
-            val inputIndex = c.dequeueInputBuffer(TIMEOUT_US)
-            if (inputIndex >= 0) {
-                val inputBuffer = c.getInputBuffer(inputIndex) ?: return
-                inputBuffer.clear()
-                val toWrite = minOf(annexBData.size, inputBuffer.remaining())
-                inputBuffer.put(annexBData, 0, toWrite)
-                c.queueInputBuffer(inputIndex, 0, toWrite, System.nanoTime() / 1000, 0)
+            var inputIndex = -1
+            var attempts = 0
+            // Try again up to 3 times if the buffer is full.
+            while (inputIndex < 0 && attempts < 3 && running.get()) {
+                inputIndex = c.dequeueInputBuffer(2000)
+                if (inputIndex >= 0) {
+                    val inputBuffer = c.getInputBuffer(inputIndex) ?: return
+                    inputBuffer.clear()
+                    inputBuffer.put(annexBData)
+                    c.queueInputBuffer(inputIndex, 0, annexBData.size, timestampUs, 0)
+                } else {
+                    attempts++
+                }
+                // If the output buffer is full, quickly free up space to empty the input.
+                drainOutput()
             }
-
-            // Drain output
-            val info = MediaCodec.BufferInfo()
-            var outputIndex = c.dequeueOutputBuffer(info, 0)
-            while (outputIndex >= 0) {
-                val render = info.size > 0
-                c.releaseOutputBuffer(outputIndex, render)
-                outputIndex = c.dequeueOutputBuffer(info, 0)
-            }
-        } catch (e: MediaCodec.CodecException) {
-            Log.e(TAG, "Codec error: ${e.message}")
-            running.set(false)
-            release()
         } catch (e: Exception) {
-            Log.w(TAG, "feedNalu error: ${e.message}")
+            Log.e(TAG, "feedNalu error: $e")
+        }
+    }
+
+    private fun drainOutput() {
+        val c = codec ?: return
+        val info = MediaCodec.BufferInfo()
+        // Wait a maximum of 10ms to retrieve the output buffer.
+        var outputIndex = c.dequeueOutputBuffer(info, 10000)
+        while (outputIndex >= 0) {
+            // true: Display on screen immediately
+            c.releaseOutputBuffer(outputIndex, true)
+            outputIndex = c.dequeueOutputBuffer(info, 0)
         }
     }
 
@@ -111,10 +124,12 @@ internal class MediaCodecDecoder {
         initialized.set(false)
         try {
             codec?.stop()
-        } catch (e: Exception) { /* ignore */ }
+        } catch (_: Exception) { /* ignore */
+        }
         try {
             codec?.release()
-        } catch (e: Exception) { /* ignore */ }
+        } catch (_: Exception) { /* ignore */
+        }
         codec = null
     }
 

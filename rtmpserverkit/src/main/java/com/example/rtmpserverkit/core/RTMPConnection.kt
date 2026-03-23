@@ -43,7 +43,7 @@ internal class RTMPConnection(
             // Perform handshake
             val handshake = RTMPHandshake()
             if (!handshake.performServer(input, output)) {
-                Log.w(TAG, "Handshake failed")
+                Log.d(TAG, "RTMP Handshake FAILED with ${socket.remoteSocketAddress}")
                 return
             }
 
@@ -67,28 +67,39 @@ internal class RTMPConnection(
                             chunkParser.setChunkSize(newSize)
                         }
                     }
-                    RTMPMessage.TYPE_WINDOW_ACK_SIZE -> { /* acknowledge */ }
-                    RTMPMessage.TYPE_ACK -> { /* acknowledge bytes */ }
+
+                    RTMPMessage.TYPE_WINDOW_ACK_SIZE -> { /* acknowledge */
+                    }
+
+                    RTMPMessage.TYPE_ACK -> { /* acknowledge bytes */
+                    }
+
                     RTMPMessage.TYPE_COMMAND_AMF0 -> {
                         handleCommand(msg.payload, commandHandler)
                     }
+
                     RTMPMessage.TYPE_DATA_AMF0 -> {
                         // Metadata - usually @setDataFrame
                     }
+
                     RTMPMessage.TYPE_VIDEO -> {
                         if (state == RTMPSessionState.PUBLISHING || state == RTMPSessionState.CONNECTED) {
                             state = RTMPSessionState.PUBLISHING
-                            handleVideo(msg.payload, h264Parser)
+                            handleVideo(msg, h264Parser)
+                            msg
                         }
                     }
+
                     RTMPMessage.TYPE_AUDIO -> {
                         // Audio not decoded in this implementation
                     }
-                    else -> { /* ignore */ }
+
+                    else -> { /* ignore */
+                    }
                 }
             }
         } catch (e: Exception) {
-            Log.d(TAG, "Connection ended: ${e.message}")
+            Log.d(TAG, "Connection error: $e")
         } finally {
             state = RTMPSessionState.CLOSED
             runCatching { socket.close() }
@@ -113,16 +124,38 @@ internal class RTMPConnection(
         }
     }
 
-    private fun handleVideo(payload: ByteArray, h264Parser: H264Parser) {
+    private fun handleVideo(msg: RTMPMessage, h264Parser: H264Parser) {
         try {
+            val payload = msg.payload
             if (payload.size < 2) return
+
+            val avcPacketType = payload[1].toInt()
+
+            // 1. Process SPS/PPS to create a decoder.
+            if (avcPacketType == 0) {
+                h264Parser.parseVideoData(payload)
+                val sps = h264Parser.spsStore.getSPS()
+                val pps = h264Parser.spsStore.getPPS()
+                val width = h264Parser.spsStore.width
+                val height = h264Parser.spsStore.height
+
+                if (sps != null && pps != null) {
+                    decoder?.initWithSPSPPS(sps = sps, pps = pps, width = width, height = height)
+                }
+                return // Exit after processing the configuration
+            }
+
+            // 2. NALU PROCESSING (VIDEO DATA)
             val nalus = h264Parser.parseVideoData(payload) ?: return
+            val timestampUs = System.nanoTime() / 1000
+
             for (nalu in nalus) {
                 onFrame?.invoke(nalu)
-                decoder?.feedNalu(nalu)
+                decoder?.feedNalu(nalu, timestampUs)
             }
+
         } catch (e: Exception) {
-            Log.w(TAG, "Error handling video: ${e.message}")
+            Log.e(TAG, "Error handling video: $e")
         }
     }
 }

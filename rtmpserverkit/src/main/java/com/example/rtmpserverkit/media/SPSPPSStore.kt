@@ -7,6 +7,11 @@ package com.example.rtmpserverkit.media
 internal class SPSPPSStore {
 
     @Volatile
+    var width: Int = 1280
+    @Volatile
+    var height: Int = 720
+
+    @Volatile
     private var sps: ByteArray? = null
 
     @Volatile
@@ -17,6 +22,13 @@ internal class SPSPPSStore {
     fun update(newSps: ByteArray, newPps: ByteArray) {
         sps = newSps.copyOf()
         pps = newPps.copyOf()
+    }
+
+    fun update(newSps: ByteArray, newPps: ByteArray, width: Int, height: Int) {
+        sps = newSps.copyOf()
+        pps = newPps.copyOf()
+        this.width = width
+        this.height = height
     }
 
     fun getSPS(): ByteArray? = sps?.copyOf()
