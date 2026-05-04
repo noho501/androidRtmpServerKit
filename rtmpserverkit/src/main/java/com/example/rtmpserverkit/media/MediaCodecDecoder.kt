@@ -20,36 +20,53 @@ internal class MediaCodecDecoder {
         private const val TIMEOUT_US = 10_000L
     }
 
-    @Volatile
-    private var codec: MediaCodec? = null
-
-    @Volatile
-    private var surface: Surface? = null
+    @Volatile private var codec: MediaCodec? = null
+    @Volatile private var surface: Surface? = null
 
     private val initialized = AtomicBoolean(false)
     private val running = AtomicBoolean(false)
 
-    fun attachSurface(surface: Surface?) {
-        this.surface = surface
-        // If codec is already running with old surface, reinitialize
-        if (initialized.get() && surface != null) {
+    private var cachedSps: ByteArray? = null
+    private var cachedPps: ByteArray? = null
+    private var cachedWidth: Int = 0
+    private var cachedHeight: Int = 0
+
+    fun attachSurface(newSurface: Surface?) {
+        this.surface = newSurface
+
+        if (newSurface == null) {
+
+            return
+        }
+
+        if (initialized.get()) {
             try {
-                codec?.setOutputSurface(surface)
+                codec?.setOutputSurface(newSurface)
             } catch (e: Exception) {
-                // If setOutputSurface not supported, release and reinitialize on next SPS
-                Log.w(TAG, "setOutputSurface failed, will reinitialize: ${e.message}")
-                release()
+                Log.w(TAG, "setOutputSurface failed, recreating codec: ${e.message}")
+                recreateCodec()
             }
+        } else {
+            recreateCodec()
         }
     }
 
-    /**
-     * Initialize the decoder with SPS and PPS NAL unit data (without start codes).
-     */
-    fun initWithSPSPPS(sps: ByteArray, pps: ByteArray, width: Int, height: Int) {
-        val surf = surface ?: run {
-            return
+    private fun recreateCodec() {
+        val sps = cachedSps
+        val pps = cachedPps
+        if (sps != null && pps != null && cachedWidth > 0 && cachedHeight > 0) {
+            Log.i(TAG, "Resurrecting codec with cached SPS/PPS")
+            initWithSPSPPS(sps, pps, cachedWidth, cachedHeight)
         }
+    }
+
+    fun initWithSPSPPS(sps: ByteArray, pps: ByteArray, width: Int, height: Int) {
+        val surf = surface ?: return
+
+        cachedSps = sps
+        cachedPps = pps
+        cachedWidth = width
+        cachedHeight = height
 
         try {
             release()
@@ -59,9 +76,7 @@ internal class MediaCodecDecoder {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 format.setInteger(MediaFormat.KEY_LATENCY, 0)
             }
-
-            format.setInteger(MediaFormat.KEY_PRIORITY, 0) // Real-time priority
-            // SPS and PPS are stored without start codes in MediaFormat
+            format.setInteger(MediaFormat.KEY_PRIORITY, 0)
             format.setByteBuffer("csd-0", ByteBuffer.wrap(prependStartCode(sps)))
             format.setByteBuffer("csd-1", ByteBuffer.wrap(prependStartCode(pps)))
 
@@ -125,14 +140,8 @@ internal class MediaCodecDecoder {
     fun release() {
         running.set(false)
         initialized.set(false)
-        try {
-            codec?.stop()
-        } catch (_: Exception) { /* ignore */
-        }
-        try {
-            codec?.release()
-        } catch (_: Exception) { /* ignore */
-        }
+        try { codec?.stop() } catch (_: Exception) {}
+        try { codec?.release() } catch (_: Exception) {}
         codec = null
     }
 
