@@ -82,4 +82,8 @@ class RTMPServerPublic {
     fun attachSurface(surface: Surface) {
         renderer.attachSurface(surface)
     }
+
+    fun detachSurface() {
+        renderer.release()
+    }
 }
