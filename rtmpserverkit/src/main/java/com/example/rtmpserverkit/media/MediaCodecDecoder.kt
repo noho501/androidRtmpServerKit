@@ -113,8 +113,11 @@ internal class MediaCodecDecoder {
         // Wait a maximum of 10ms to retrieve the output buffer.
         var outputIndex = c.dequeueOutputBuffer(info, 10000)
         while (outputIndex >= 0) {
-            // true: Display on screen immediately
-            c.releaseOutputBuffer(outputIndex, true)
+            val currentSurface = surface
+
+            val shouldRender = currentSurface != null && currentSurface.isValid
+
+            c.releaseOutputBuffer(outputIndex, shouldRender)
             outputIndex = c.dequeueOutputBuffer(info, 0)
         }
     }
