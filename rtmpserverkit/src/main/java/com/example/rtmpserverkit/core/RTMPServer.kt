@@ -3,6 +3,7 @@ package com.example.rtmpserverkit.core
 import android.util.Log
 import com.example.rtmpserverkit.media.MediaCodecDecoder
 import java.net.ServerSocket
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -19,12 +20,13 @@ internal class RTMPServer {
     private val running = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
     private val executor = Executors.newCachedThreadPool()
-    private val connections = mutableListOf<RTMPConnection>()
 
-    var decoder: MediaCodecDecoder? = null
-    var onFrame: ((ByteArray) -> Unit)? = null
+    // Map manage connection by streamKey
+    private val connectionsMap = ConcurrentHashMap<String, RTMPConnection>()
+
+    var onFrame: ((String, ByteArray) -> Unit)? = null
     var onPublish: ((String) -> Unit)? = null
-    var onDisconnect: (() -> Unit)? = null
+    var onDisconnect: ((String) -> Unit)? = null
 
     fun start(port: Int = 1935) {
         if (running.getAndSet(true)) return
@@ -40,15 +42,21 @@ internal class RTMPServer {
                         val socket = ss.accept()
                         val conn = RTMPConnection(
                             socket = socket,
-                            decoder = decoder,
-                            onPublish = onPublish,
-                            onFrame = onFrame,
-                            onDisconnect = {
-                                onDisconnect?.invoke()
-                                Log.d(TAG, "Client disconnected")
+                            onPublish = { key, connection ->
+                                connectionsMap[key] = connection
+                                onPublish?.invoke(key)
+                            },
+                            onFrame = { key, frame ->
+                                onFrame?.invoke(key, frame)
+                            },
+                            onDisconnect = { key ->
+                                if (key.isNotEmpty()) {
+                                    connectionsMap.remove(key)
+                                }
+                                onDisconnect?.invoke(key)
+                                Log.d(TAG, "Client disconnected: $key")
                             }
                         )
-                        synchronized(connections) { connections.add(conn) }
                         executor.submit(conn)
                     } catch (e: Exception) {
                         if (running.get()) {
@@ -65,10 +73,12 @@ internal class RTMPServer {
     fun stop() {
         running.set(false)
         runCatching { serverSocket?.close() }
-        synchronized(connections) {
-            connections.forEach { it.close() }
-            connections.clear()
-        }
+        connectionsMap.values.forEach { it.close() }
+        connectionsMap.clear()
         executor.shutdownNow()
+    }
+
+    fun getDecoder(streamKey: String): MediaCodecDecoder? {
+        return connectionsMap[streamKey]?.decoder
     }
 }

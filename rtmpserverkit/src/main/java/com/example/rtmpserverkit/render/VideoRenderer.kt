@@ -5,80 +5,69 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.TextureView
 import android.graphics.SurfaceTexture
-import com.example.rtmpserverkit.media.MediaCodecDecoder
+import com.example.rtmpserverkit.core.RTMPServer
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Manages Surface attachment for the MediaCodec decoder.
- * Supports both SurfaceView and TextureView.
+ * Supports handling multiple streams by streamKey.
  */
-internal class VideoRenderer(private val decoder: MediaCodecDecoder) {
+internal class VideoRenderer(private val server: RTMPServer) {
 
-    private var surfaceView: SurfaceView? = null
-    private var textureView: TextureView? = null
+    private val surfaceMap = ConcurrentHashMap<String, Surface>()
 
-    private val surfaceCallback = object : SurfaceHolder.Callback {
-        override fun surfaceCreated(holder: SurfaceHolder) {
-            decoder.attachSurface(holder.surface)
-        }
-
-        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-            // Surface size changed - decoder handles this
-        }
-
-        override fun surfaceDestroyed(holder: SurfaceHolder) {
-            decoder.attachSurface(null)
+    fun onPublish(streamKey: String) {
+        // Attach again if surface was mapped before the stream was published
+        surfaceMap[streamKey]?.let {
+            server.getDecoder(streamKey)?.attachSurface(it)
         }
     }
 
-    private val textureListener = object : TextureView.SurfaceTextureListener {
-        override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
-            decoder.attachSurface(Surface(texture))
-        }
-
-        override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) {}
-
-        override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
-            decoder.attachSurface(null)
-            return true
-        }
-
-        override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {}
+    fun attachSurface(streamKey: String, surface: Surface) {
+        surfaceMap[streamKey] = surface
+        server.getDecoder(streamKey)?.attachSurface(surface)
     }
 
-    fun attachSurfaceView(view: SurfaceView) {
-        detach()
-        surfaceView = view
-        view.holder.addCallback(surfaceCallback)
-        // If surface already exists
-        if (view.holder.surface != null && view.holder.surface.isValid) {
-            decoder.attachSurface(view.holder.surface)
+    fun detachSurface(streamKey: String) {
+        surfaceMap.remove(streamKey)
+        server.getDecoder(streamKey)?.attachSurface(null)
+    }
+
+    fun attachSurfaceView(streamKey: String, view: SurfaceView) {
+        view.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                attachSurface(streamKey, holder.surface)
+            }
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {}
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                detachSurface(streamKey)
+            }
+        })
+        if (view.holder.surface?.isValid == true) {
+            attachSurface(streamKey, view.holder.surface)
         }
     }
 
-    fun attachTextureView(view: TextureView) {
-        detach()
-        textureView = view
-        view.surfaceTextureListener = textureListener
+    fun attachTextureView(streamKey: String, view: TextureView) {
+        view.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(tex: SurfaceTexture, w: Int, h: Int) {
+                attachSurface(streamKey, Surface(tex))
+            }
+            override fun onSurfaceTextureSizeChanged(tex: SurfaceTexture, w: Int, h: Int) {}
+            override fun onSurfaceTextureDestroyed(tex: SurfaceTexture): Boolean {
+                detachSurface(streamKey)
+                return true
+            }
+            override fun onSurfaceTextureUpdated(tex: SurfaceTexture) {}
+        }
         if (view.isAvailable) {
             val texture = view.surfaceTexture ?: return
-            decoder.attachSurface(Surface(texture))
+            attachSurface(streamKey, Surface(texture))
         }
     }
 
-    fun attachSurface(surface: Surface) {
-        detach()
-        decoder.attachSurface(surface)
-    }
-
-    fun detach() {
-        surfaceView?.holder?.removeCallback(surfaceCallback)
-        surfaceView = null
-        textureView?.surfaceTextureListener = null
-        textureView = null
-    }
-
-    fun release() {
-        detach()
-        decoder.attachSurface(null)
+    fun releaseAll() {
+        surfaceMap.keys.forEach { detachSurface(it) }
+        surfaceMap.clear()
     }
 }

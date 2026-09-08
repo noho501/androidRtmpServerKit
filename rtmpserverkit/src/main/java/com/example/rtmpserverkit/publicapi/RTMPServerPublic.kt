@@ -4,22 +4,10 @@ import android.view.Surface
 import android.view.SurfaceView
 import android.view.TextureView
 import com.example.rtmpserverkit.core.RTMPServer
-import com.example.rtmpserverkit.media.MediaCodecDecoder
 import com.example.rtmpserverkit.render.VideoRenderer
 
 /**
  * Public API for the RTMP Server SDK.
- *
- * Usage:
- * ```kotlin
- * val server = RTMPServerPublic()
- * server.onPublish = { streamKey -> Log.d("RTMP", "Publishing: $streamKey") }
- * server.onDisconnect = { Log.d("RTMP", "Client disconnected") }
- * server.attachSurface(surfaceView)
- * server.start()
- * // ...
- * server.stop()
- * ```
  */
 class RTMPServerPublic {
 
@@ -27,27 +15,24 @@ class RTMPServerPublic {
     var onPublish: ((String) -> Unit)? = null
 
     /** Called when a client disconnects. */
-    var onDisconnect: (() -> Unit)? = null
+    var onDisconnect: ((String) -> Unit)? = null
 
-    /**
-     * Called for each decoded frame as raw Annex-B NALU bytes.
-     * Note: For rendering, use [attachSurface] instead.
-     */
-    var onFrame: ((ByteArray) -> Unit)? = null
+    /** Called for each decoded frame as raw Annex-B NALU bytes. */
+    var onFrame: ((String, ByteArray) -> Unit)? = null
 
-    private val decoder = MediaCodecDecoder()
-    private val renderer = VideoRenderer(decoder)
-    private val server = RTMPServer().also { s ->
-        s.decoder = decoder
-        s.onPublish = { key -> onPublish?.invoke(key) }
-        s.onDisconnect = { onDisconnect?.invoke() }
-        s.onFrame = { frame -> onFrame?.invoke(frame) }
+    private val server = RTMPServer()
+    private val renderer = VideoRenderer(server)
+
+    init {
+        server.onPublish = { key ->
+            renderer.onPublish(key)
+            onPublish?.invoke(key)
+        }
+        server.onDisconnect = { key -> onDisconnect?.invoke(key) }
+        server.onFrame = { key, frame -> onFrame?.invoke(key, frame) }
     }
 
-    /**
-     * Starts the RTMP server on the specified port.
-     * @param port TCP port to listen on (default: 1935)
-     */
+    /** Starts the RTMP server on the specified port. */
     fun start(port: Int = 1935) {
         server.start(port)
     }
@@ -55,35 +40,22 @@ class RTMPServerPublic {
     /** Stops the RTMP server and releases resources. */
     fun stop() {
         server.stop()
-        renderer.release()
-        decoder.release()
+        renderer.releaseAll()
     }
 
-    /**
-     * Attaches a [SurfaceView] for video rendering.
-     * Call before or after [start].
-     */
-    fun attachSurface(surfaceView: SurfaceView) {
-        renderer.attachSurfaceView(surfaceView)
+    fun attachSurface(streamKey: String, surfaceView: SurfaceView) {
+        renderer.attachSurfaceView(streamKey, surfaceView)
     }
 
-    /**
-     * Attaches a [TextureView] for video rendering.
-     * Call before or after [start].
-     */
-    fun attachSurface(textureView: TextureView) {
-        renderer.attachTextureView(textureView)
+    fun attachSurface(streamKey: String, textureView: TextureView) {
+        renderer.attachTextureView(streamKey, textureView)
     }
 
-    /**
-     * Attaches a raw [Surface] for video rendering.
-     * Call before or after [start].
-     */
-    fun attachSurface(surface: Surface) {
-        renderer.attachSurface(surface)
+    fun attachSurface(streamKey: String, surface: Surface) {
+        renderer.attachSurface(streamKey, surface)
     }
 
-    fun detachSurface() {
-        renderer.release()
+    fun detachSurface(streamKey: String) {
+        renderer.detachSurface(streamKey)
     }
 }

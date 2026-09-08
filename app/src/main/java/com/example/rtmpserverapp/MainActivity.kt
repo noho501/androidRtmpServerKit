@@ -1,5 +1,6 @@
 package com.example.rtmpserverapp
 
+import android.annotation.SuppressLint
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
@@ -15,6 +16,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val RTMP_PORT = 1935
+        private const val TEST_STREAM_KEY = "test"
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -33,39 +35,40 @@ class MainActivity : AppCompatActivity() {
         setupServer()
     }
 
+    @SuppressLint("SetTextI18n")
     private fun setupRtmpUrl() {
         val ip = getLocalIpAddress() ?: "192.168.x.x"
         val url = "rtmp://$ip:$RTMP_PORT/live"
 
         binding.tvRtmpUrl.text = url
-        binding.tvStreamKey.text = "Stream key: test"
+        binding.tvStreamKey.text = "Stream key: $TEST_STREAM_KEY"
 
         Log.d(TAG, "URL: $url")
     }
 
+    @SuppressLint("SetTextI18n")
     private fun setupServer() {
-        rtmpServer.onPublish = { _ ->
+        rtmpServer.onPublish = { streamKey ->
             runOnUiThread {
-                binding.tvStatus.text = "● LIVE"
+                binding.tvStatus.text = "● LIVE ($streamKey)"
                 binding.tvStatus.setTextColor("#FF4444".toColorInt())
             }
         }
 
-        rtmpServer.onDisconnect = {
-            Log.i(TAG, "Client disconnected")
+        rtmpServer.onDisconnect = { streamKey ->
+            Log.i(TAG, "Client disconnected: $streamKey")
             runOnUiThread {
                 binding.tvStatus.text = "Waiting for stream…"
                 binding.tvStatus.setTextColor(android.graphics.Color.WHITE)
             }
         }
 
-        // Attach the SurfaceView for video rendering
-        rtmpServer.attachSurface(binding.surfaceView)
+        // Attach the SurfaceView for video rendering mapped with the key
+        rtmpServer.attachSurface(TEST_STREAM_KEY, binding.surfaceView)
 
         try {
             // Start server
             rtmpServer.start(RTMP_PORT)
-
         } catch (e: Exception) {
             Log.d(TAG, "Failed to start RTMP Server: ${e.message}")
         }

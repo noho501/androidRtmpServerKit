@@ -17,10 +17,9 @@ import java.net.Socket
  */
 internal class RTMPConnection(
     private val socket: Socket,
-    private val decoder: MediaCodecDecoder?,
-    private val onPublish: ((String) -> Unit)?,
-    private val onFrame: ((ByteArray) -> Unit)?,
-    private val onDisconnect: (() -> Unit)?
+    private val onPublish: ((String, RTMPConnection) -> Unit)?,
+    private val onFrame: ((String, ByteArray) -> Unit)?,
+    private val onDisconnect: ((String) -> Unit)?
 ) : Runnable {
 
     companion object {
@@ -31,6 +30,9 @@ internal class RTMPConnection(
     private var running = true
 
     private var state = RTMPSessionState.CONNECTING
+
+    val decoder = MediaCodecDecoder()
+    private var currentStreamKey: String = ""
 
     override fun run() {
         try {
@@ -50,7 +52,10 @@ internal class RTMPConnection(
             state = RTMPSessionState.CONNECTED
 
             val chunkParser = RTMPChunkParser()
-            val commandHandler = RTMPCommandHandler(output, onPublish)
+            val commandHandler = RTMPCommandHandler(output) { key ->
+                currentStreamKey = key
+                onPublish?.invoke(key, this)
+            }
             val h264Parser = H264Parser()
 
             // Message processing loop
@@ -103,7 +108,8 @@ internal class RTMPConnection(
         } finally {
             state = RTMPSessionState.CLOSED
             runCatching { socket.close() }
-            onDisconnect?.invoke()
+            decoder.release()
+            onDisconnect?.invoke(currentStreamKey)
         }
     }
 
@@ -140,7 +146,7 @@ internal class RTMPConnection(
                 val height = h264Parser.spsStore.height
 
                 if (sps != null && pps != null) {
-                    decoder?.initWithSPSPPS(sps = sps, pps = pps, width = width, height = height)
+                    decoder.initWithSPSPPS(sps = sps, pps = pps, width = width, height = height)
                 }
                 return // Exit after processing the configuration
             }
@@ -150,8 +156,8 @@ internal class RTMPConnection(
             val timestampUs = System.nanoTime() / 1000
 
             for (nalu in nalus) {
-                onFrame?.invoke(nalu)
-                decoder?.feedNalu(nalu, timestampUs)
+                onFrame?.invoke(currentStreamKey, nalu)
+                decoder.feedNalu(nalu, timestampUs)
             }
 
         } catch (e: Exception) {
